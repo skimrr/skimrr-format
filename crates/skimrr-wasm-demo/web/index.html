@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Opening a .skimrr in a browser</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --ink: #1a1a18; --muted: #6e6e69; --line: #e4e4e1;
+    --paper: #faf9f7; --surface: #fff; --accent: #f0b429; --danger: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #ecebe7; --muted: #9c9c95; --line: #2b2b29;
+            --paper: #131312; --surface: #1b1b19; --danger: #f2b8b5; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 3rem 1.5rem; background: var(--paper); color: var(--ink);
+    font: 15px/1.6 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.4rem; letter-spacing: -0.01em; }
+  .lede { color: var(--muted); margin: 0 0 2rem; }
+  .drop {
+    border: 1.5px dashed var(--line); border-radius: 12px; padding: 2.4rem 1.5rem;
+    text-align: center; background: var(--surface); transition: border-color 160ms ease;
+  }
+  .drop.over { border-color: var(--accent); }
+  .drop p { margin: 0 0 1rem; color: var(--muted); }
+  button, input[type="password"] {
+    font: inherit; padding: 0.55rem 0.9rem; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #2a2108; font-weight: 600; }
+  .row { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin-top: 1.2rem; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1.2rem 1.4rem; margin-top: 1.5rem; }
+  .card h2 { font-size: 1rem; margin: 0 0 0.8rem; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1.2rem; margin: 0; }
+  dt { color: var(--muted); font-size: 0.85rem; }
+  dd { margin: 0; font-variant-numeric: tabular-nums; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.86rem; margin-top: 0.6rem; }
+  th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .err { color: var(--danger); }
+  .note { color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--line); margin-top: 2.5rem; padding-top: 1rem; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Opening a <code>.skimrr</code> in a browser</h1>
+  <p class="lede">
+    A proof, not a product. The page below runs the same Rust that Skimrr runs on the
+    desktop, compiled to WebAssembly: the same framing, the same Argon2id, the same
+    XChaCha20-Poly1305. Your file is read by this tab and goes nowhere — there is no
+    upload here, and no server to upload to.
+  </p>
+
+  <div class="drop" id="drop">
+    <p id="dropText">Drop a <code>.skimrr</code> here, or choose one.</p>
+    <input type="file" id="file" accept=".skimrr" hidden />
+    <button class="primary" id="choose">Choose a file…</button>
+  </div>
+
+  <div class="card" id="headerCard" hidden>
+    <h2>What the file says about itself</h2>
+    <p class="lede" style="margin:0 0 1rem">Read without any key at all — which is how a
+      reader knows to ask for a password before it has one.</p>
+    <dl id="headerFacts"></dl>
+    <div class="row" id="passwordRow" hidden>
+      <input type="password" id="password" placeholder="Password" autocomplete="off" />
+      <button class="primary" id="open">Open</button>
+    </div>
+    <div class="row" id="openRow">
+      <button class="primary" id="openPlain">Open</button>
+    </div>
+    <p class="err" id="error" hidden></p>
+  </div>
+
+  <div class="card" id="projectCard" hidden>
+    <h2 id="projectName"></h2>
+    <dl id="projectFacts"></dl>
+    <table id="entries"><thead><tr>
+      <th>Path</th><th class="num">Size</th><th class="num">Sharpness</th><th>Kept</th>
+    </tr></thead><tbody></tbody></table>
+  </div>
+
+  <p class="note" id="cost"></p>
+  <p class="note">
+    The module imports exactly one thing from this page: the platform's random number
+    generator. It has no way to reach the network, and nothing was built into it that
+    could.
+  </p>
+</main>
+
+<script type="module">
+import { loadSkimrr } from "./skimrr.mjs";
+
+const el = (id) => document.getElementById(id);
+const skimrr = await loadSkimrr(fetch("../target/wasm32-unknown-unknown/release/skimrr_wasm_demo.wasm"));
+
+let file = null;
+
+function facts(target, pairs) {
+  target.innerHTML = "";
+  for (const [term, value] of pairs) {
+    const dt = document.createElement("dt");
+    dt.textContent = term;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    target.append(dt, dd);
+  }
+}
+
+const bytes = (n) =>
+  n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+
+function show(loaded) {
+  file = loaded;
+  el("error").hidden = true;
+  el("projectCard").hidden = true;
+  const head = skimrr.peek(file);
+  el("headerCard").hidden = false;
+
+  if (!head.ok) {
+    facts(el("headerFacts"), []);
+    el("passwordRow").hidden = true;
+    el("openRow").hidden = true;
+    el("error").hidden = false;
+    el("error").textContent = head.error;
+    return;
+  }
+
+  facts(el("headerFacts"), [
+    ["Encrypted", head.encrypted ? "yes" : "no"],
+    ["Key derivation", head.kdf ? `${head.kdf.algorithm}, ${head.kdf.m_kib / 1024} MiB, t=${head.kdf.t}, p=${head.kdf.p}` : "—"],
+    ["Carries", head.originals ? "the photographs" : head.thumbnails ? "previews" : "findings only"],
+    ["Payload", `${bytes(head.body_len)} in ${head.blobs} blobs`],
+  ]);
+  el("passwordRow").hidden = !head.encrypted;
+  el("openRow").hidden = head.encrypted;
+}
+
+function open(password) {
+  const result = skimrr.open(file, password);
+  if (!result.ok) {
+    el("error").hidden = false;
+    el("error").textContent = result.error;
+    el("projectCard").hidden = true;
+    return;
+  }
+  el("error").hidden = true;
+  el("projectCard").hidden = false;
+  el("projectName").textContent = result.name;
+  facts(el("projectFacts"), [
+    ["Photographs", result.photos.toLocaleString()],
+    ["Duplicate groups", result.groups.toLocaleString()],
+    ["Made from", result.roots.join(", ")],
+    ["Created", new Date(result.created * 1000).toLocaleString()],
+  ]);
+  const body = el("entries").querySelector("tbody");
+  body.innerHTML = "";
+  for (const entry of result.entries.slice(0, 200)) {
+    const tr = document.createElement("tr");
+    for (const [text, cls] of [
+      [entry.path, ""],
+      [bytes(entry.size), "num"],
+      [entry.blur === null ? "—" : entry.blur.toFixed(0), "num"],
+      [entry.kept ? "keep" : "", ""],
+    ]) {
+      const td = document.createElement("td");
+      td.className = cls;
+      td.textContent = text;
+      tr.append(td);
+    }
+    body.append(tr);
+  }
+}
+
+el("choose").onclick = () => el("file").click();
+el("file").onchange = async (e) => {
+  const picked = e.target.files[0];
+  if (picked) show(new Uint8Array(await picked.arrayBuffer()));
+};
+el("open").onclick = () => {
+  const field = el("password");
+  open(field.value);
+  field.value = "";
+};
+el("openPlain").onclick = () => open(null);
+
+const drop = el("drop");
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = async (e) => {
+  e.preventDefault();
+  drop.classList.remove("over");
+  const picked = e.dataTransfer.files[0];
+  if (picked) show(new Uint8Array(await picked.arrayBuffer()));
+};
+
+// Measured here rather than quoted from somewhere else: this is the cost on the machine
+// and the engine actually in front of you.
+el("cost").textContent =
+  "One key derivation on this machine, in this browser: " +
+  [[131072, 3, "Strong"], [262144, 4, "Maximum"]]
+    .map(([m, t, label]) => `${label} ${skimrr.benchArgon2(m, t, 1).toFixed(0)} ms`)
+    .join(" · ") + ".";
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# The two crates are kept as they are in the application's own tree, so a change can be
+# copied across without being rearranged first.
+[workspace]
+resolver = "2"
+members = ["crates/skimrr-format"]
+# The WebAssembly demo is deliberately out of the workspace: it builds for
+# wasm32-unknown-unknown with its own linker flags, and pulling it in here would impose
+# those on `cargo test` at the root.
+exclude = ["crates/skimrr-wasm-demo"]

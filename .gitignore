@@ -1,0 +1,5 @@
+target/
+node_modules/
+# Safety net if a key or a secret ever lands in this tree.
+*.key
+*.skimrr
